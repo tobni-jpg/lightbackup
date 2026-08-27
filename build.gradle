@@ -21,9 +21,10 @@ dependencies {
 	implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
 
 	// Parallel zip compression (bundled into the mod jar)
+	// NOTE: never bundle commons-lang3 here - vanilla Minecraft relies on its own
+	// version where MutableObject implements Supplier; a newer lang3 breaks datapack loading.
 	implementation include("org.apache.commons:commons-compress:1.27.1")
 	implementation include("commons-io:commons-io:2.16.1")
-	implementation include("org.apache.commons:commons-lang3:3.14.0")
 }
 
 processResources {
