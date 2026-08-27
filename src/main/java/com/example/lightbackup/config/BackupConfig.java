@@ -22,8 +22,8 @@ public final class BackupConfig {
 	public boolean announceToPlayers = true;
 	public boolean autoUpload = false;
 	public int uploadEveryNthBackup = 1;
-	public int compressionSleepMs = 5;
-	public int compressionThreads = 1;
+	public int compressionSleepMs = 0;
+	public int compressionThreads = 2;
 	public int compressionLevel = 6;
 	public double rateLimitUploadMBPerSec = 10.0;
 
