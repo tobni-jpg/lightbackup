@@ -46,13 +46,28 @@ public final class BackupManager {
 	private static final String SUFFIX = ".zip";
 
 	private static final AtomicBoolean running = new AtomicBoolean(false);
-	private static long lastBackupTick = 0;
+	// wall-clock based scheduling: 26.2 pauses the tick loop when the server is
+	// empty, so tick-counters never advance while nobody is online
+	private static long lastBackupWallClock = 0;
+	private static Path lastBackupFile() {
+		return FabricLoader.getInstance().getConfigDir().resolve("lightbackup.lastbackup");
+	}
 
 	private BackupManager() {
 	}
 
 	public static void onServerStart(MinecraftServer server) {
-		lastBackupTick = server.getTickCount();
+		try {
+			if (Files.exists(lastBackupFile())) {
+				lastBackupWallClock = Long.parseLong(Files.readString(lastBackupFile()).trim());
+			}
+		} catch (Exception e) {
+			LightBackup.LOGGER.warn("Failed to read last-backup timestamp, scheduling from now", e);
+			lastBackupWallClock = System.currentTimeMillis();
+		}
+		if (lastBackupWallClock <= 0) {
+			lastBackupWallClock = System.currentTimeMillis();
+		}
 		BackupConfig config = BackupConfig.get();
 		LightBackup.LOGGER.info("Light Backup enabled: backup every {} minute(s) to '{}', keeping {} backup(s)",
 				config.intervalMinutes, config.backupDirectory, config.maxBackups);
@@ -63,13 +78,22 @@ public final class BackupManager {
 		if (!config.enabled) {
 			return;
 		}
-		long intervalTicks = config.intervalMinutes * 60L * 20L;
-		if (intervalTicks <= 0 || running.get()) {
+		long intervalMs = config.intervalMinutes * 60L * 1000L;
+		if (intervalMs <= 0 || running.get()) {
 			return;
 		}
-		if (server.getTickCount() - lastBackupTick >= intervalTicks) {
-			lastBackupTick = server.getTickCount();
+		if (System.currentTimeMillis() - lastBackupWallClock >= intervalMs) {
+			lastBackupWallClock = System.currentTimeMillis();
+			storeLastBackup();
 			startBackup(server, "scheduled");
+		}
+	}
+
+	private static void storeLastBackup() {
+		try {
+			Files.writeString(lastBackupFile(), Long.toString(lastBackupWallClock));
+		} catch (IOException e) {
+			LightBackup.LOGGER.warn("Failed to persist last-backup timestamp", e);
 		}
 	}
 
@@ -258,6 +282,8 @@ public final class BackupManager {
 			long sleepMs = Math.max(0, config.compressionSleepMs);
 			for (Path file : files) {
 				ZipArchiveEntry entry = new ZipArchiveEntry(file.toFile(), toZipName(sourceDir, file));
+				// must be set explicitly - entries without a method abort the scatter write
+				entry.setMethod(ZipArchiveEntry.DEFLATED);
 				final long sleep = sleepMs;
 				InputStreamSupplier supplier;
 				if (sleep == 0) {
