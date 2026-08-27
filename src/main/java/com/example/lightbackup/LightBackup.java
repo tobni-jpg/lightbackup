@@ -95,7 +95,8 @@ public class LightBackup implements ModInitializer {
 								context.getSource().sendSuccess(() -> Component.literal("[LightBackup] Uploading latest backup to Google Drive..."), false);
 								Thread.startVirtualThread(() -> {
 									try {
-										Path backupDir = Path.of(BackupConfig.get().backupDirectory).toAbsolutePath().normalize();
+										BackupConfig cfg = BackupConfig.get();
+										Path backupDir = Path.of(cfg.backupDirectory).toAbsolutePath().normalize();
 										List<Path> backups = new ArrayList<>();
 										try (var stream = Files.list(backupDir)) {
 											stream.filter(p -> p.getFileName().toString().startsWith("backup-") && p.getFileName().toString().endsWith(".zip"))
@@ -103,11 +104,12 @@ public class LightBackup implements ModInitializer {
 													.forEach(backups::add);
 										}
 										if (backups.isEmpty()) {
-											context.getSource().sendSuccess(() -> Component.literal("[LightBackup] No backups found to upload."), false);
+											context.getSource().sendSuccess(() -> Component.literal(cfg.msgNoBackups), false);
 											return;
 										}
-										GDriveUploader.uploadFile(backups.get(backups.size() - 1).toAbsolutePath().toString());
-										context.getSource().sendSuccess(() -> Component.literal("[LightBackup] Upload finished."), false);
+										Path latest = backups.get(backups.size() - 1);
+										String summary = GDriveUploader.uploadFile(latest.toAbsolutePath().toString());
+										context.getSource().sendSuccess(() -> Component.literal(BackupConfig.fmt(cfg.msgUploadDone, "filename", latest.getFileName().toString(), "summary", summary)), false);
 									} catch (Exception e) {
 										LightBackup.LOGGER.error("Manual upload failed", e);
 										context.getSource().sendSuccess(() -> Component.literal("[LightBackup] Upload failed: " + e.getMessage()), false);

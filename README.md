@@ -65,6 +65,28 @@ All commands require permission level 4 (operator).
 | `compressionSleepMs` | int | `5` | Milliseconds to sleep per 8KB buffer during compression (0 = no throttling) |
 | `rateLimitUploadMBPerSec` | double | `10.0` | Maximum upload speed in MB/s (0 = unlimited) |
 
+### Custom messages
+
+All server announcements can be customized via the following fields. Supported placeholders: `{reason}`, `{filename}`, `{error}`, `{summary}`.
+
+```json
+{
+  "msgBackupCreate": "[LightBackup] Creating {reason} backup '{filename}'...",
+  "msgBackupDone": "[LightBackup] Backup '{filename}' finished.",
+  "msgBackupRunning": "[LightBackup] A backup is already running, please wait.",
+  "msgSaveFailed": "[LightBackup] Backup aborted: could not save the world.",
+  "msgBackupFailed": "[LightBackup] Backup failed: {error}",
+  "msgUploadStart": "[LightBackup] Uploading '{filename}' to Google Drive...",
+  "msgUploadDone": "[LightBackup] Upload of '{filename}' finished ({summary}).",
+  "msgUploadFailed": "[LightBackup] Upload failed: {error}",
+  "msgNoBackups": "[LightBackup] No backups found to upload."
+}
+```
+
+The `{summary}` placeholder in upload success messages resolves to something like `4.68 MB in 4.8s (997 KB/s)` — file size, elapsed time and average speed.
+
+**Note:** The mod always writes the complete config with all settings on startup and `/backup reload`. If a new version adds fields, they are merged automatically with their default values. Deleted entries simply come back as defaults.
+
 ### `config/lightbackup-gdrive.json`
 
 ```json

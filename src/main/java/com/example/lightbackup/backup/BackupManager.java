@@ -64,8 +64,9 @@ public final class BackupManager {
 	}
 
 	public static void startBackup(MinecraftServer server, String reason) {
+		BackupConfig config = BackupConfig.get();
 		if (!running.compareAndSet(false, true)) {
-			broadcast(server, accent("[LightBackup] A backup is already running, please wait."));
+			broadcast(server, accent(config.msgBackupRunning));
 			return;
 		}
 
@@ -75,7 +76,7 @@ public final class BackupManager {
 		} catch (Exception e) {
 			LightBackup.LOGGER.error("Failed to save the world before backup", e);
 			running.set(false);
-			broadcast(server, error("[LightBackup] Backup aborted: could not save the world."));
+			broadcast(server, error(config.msgSaveFailed));
 			return;
 		}
 
@@ -84,7 +85,7 @@ public final class BackupManager {
 				createBackup(server, reason);
 			} catch (Exception e) {
 				LightBackup.LOGGER.error("Backup failed", e);
-				broadcast(server, error("[LightBackup] Backup failed: " + e.getMessage()));
+				broadcast(server, error(BackupConfig.fmt(config.msgBackupFailed, "error", e.getMessage())));
 			} finally {
 				running.set(false);
 			}
@@ -102,21 +103,21 @@ public final class BackupManager {
 		String filename = PREFIX + LocalDateTime.now().format(FILENAME_FORMATTER) + SUFFIX;
 		Path zipFile = backupDir.resolve(filename);
 
-		broadcast(server, accent("[LightBackup] Creating " + reason + " backup '" + filename + "'..."));
+		broadcast(server, accent(BackupConfig.fmt(config.msgBackupCreate, "reason", reason, "filename", filename)));
 		zipDirectory(worldDir, zipFile, backupDir.toAbsolutePath().normalize());
 		pruneBackups(backupDir, config.maxBackups);
 
 		LightBackup.LOGGER.info("Backup '{}' created ({})", filename, worldDir);
-		broadcast(server, ok("[LightBackup] Backup '" + filename + "' finished."));
+		broadcast(server, ok(BackupConfig.fmt(config.msgBackupDone, "filename", filename)));
 
 		if (config.autoUpload && GDriveConfig.get().isConfigured()) {
-			broadcast(server, accent("[LightBackup] Uploading '" + filename + "' to Google Drive..."));
+			broadcast(server, accent(BackupConfig.fmt(config.msgUploadStart, "filename", filename)));
 			try {
-				GDriveUploader.uploadFile(zipFile.toAbsolutePath().toString());
-				broadcast(server, ok("[LightBackup] Upload '" + filename + "' finished."));
+				String summary = GDriveUploader.uploadFile(zipFile.toAbsolutePath().toString());
+				broadcast(server, ok(BackupConfig.fmt(config.msgUploadDone, "filename", filename, "summary", summary)));
 			} catch (Exception e) {
 				LightBackup.LOGGER.error("Google Drive upload failed", e);
-				broadcast(server, error("[LightBackup] Upload failed: " + e.getMessage()));
+				broadcast(server, error(BackupConfig.fmt(config.msgUploadFailed, "error", e.getMessage())));
 			}
 		}
 	}

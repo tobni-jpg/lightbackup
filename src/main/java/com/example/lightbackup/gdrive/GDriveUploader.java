@@ -44,7 +44,11 @@ public final class GDriveUploader {
 		return extractJsonString(response, "access_token");
 	}
 
-	public static void uploadFile(String filePath) throws IOException {
+	/**
+	 * Uploads the given file to Google Drive and returns a summary like
+	 * {@code "4.68 MB in 4.8s (997 KB/s)"} for display in messages.
+	 */
+	public static String uploadFile(String filePath) throws IOException {
 		GDriveConfig gconfig = GDriveConfig.get();
 		BackupConfig config = BackupConfig.get();
 		if (!gconfig.isConfigured()) {
@@ -66,21 +70,26 @@ public final class GDriveUploader {
 		Instant start = Instant.now();
 		long[] uploaded = {0};
 
-		long bytesPerSec = (long) (config.rateLimitUploadMBPerSec * 1024 * 1024);
+		long bytesPerSec = bytesPerSec(config);
 
 		if (fileSize < 5 * 1024 * 1024) {
-			simpleUpload(accessToken, metadata, file, fileSize, bytesPerSec, config, uploaded);
+			simpleUpload(accessToken, metadata, file, fileSize, bytesPerSec, uploaded);
 		} else {
-			resumableUpload(accessToken, metadata, file, fileSize, bytesPerSec, config, uploaded);
+			resumableUpload(accessToken, metadata, file, fileSize, bytesPerSec, uploaded);
 		}
 
 		Duration elapsed = Duration.between(start, Instant.now());
-		double speed = uploaded[0] / Math.max(1.0, elapsed.toSeconds());
-		LightBackup.LOGGER.info("Uploaded '{}' to Google Drive ({} KB/s)", fileName, String.format("%.1f", speed / 1024.0));
+		double secs = Math.max(0.05, elapsed.toMillis() / 1000.0);
+		return "%.2f MB in %.1fs (%.0f KB/s)".formatted(
+				fileSize / (1024.0 * 1024.0), secs, fileSize / 1024.0 / secs);
+	}
+
+	private static long bytesPerSec(BackupConfig config) {
+		return (long) (config.rateLimitUploadMBPerSec * 1024 * 1024);
 	}
 
 	private static void simpleUpload(String token, String metadata, Path file, long fileSize,
-			long bytesPerSec, BackupConfig config, long[] uploaded) throws IOException {
+			long bytesPerSec, long[] uploaded) throws IOException {
 		String boundary = "LightBackupBoundary" + System.nanoTime();
 		String contentType = "multipart/related; boundary=" + boundary;
 
@@ -114,7 +123,7 @@ public final class GDriveUploader {
 	}
 
 	private static void resumableUpload(String token, String metadata, Path file, long fileSize,
-			long bytesPerSec, BackupConfig config, long[] uploaded) throws IOException {
+			long bytesPerSec, long[] uploaded) throws IOException {
 		String initContentType = "application/json; charset=UTF-8";
 		String initUrl = UPLOAD_URL + "?uploadType=resumable&uploadSize=" + fileSize;
 		HttpURLConnection initConn = (HttpURLConnection) URI.create(initUrl).toURL().openConnection();
