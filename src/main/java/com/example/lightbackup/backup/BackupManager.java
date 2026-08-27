@@ -277,9 +277,11 @@ public final class BackupManager {
 			return t;
 		});
 
-		// buffer compressed entries in temp files instead of the heap -
-		// a multi-GB world would otherwise push the JVM to its memory ceiling
-		Path scatterDir = Files.createTempDirectory("lightbackup-scatter");
+		// buffer compressed entries in temp files instead of the heap. The
+		// container's /tmp is often a tiny tmpfs, so use the backup directory
+		// (real disk, excluded from the zip) for the scatter files
+		Path scatterDir = excludedDir.resolve(".scatter-tmp");
+		Files.createDirectories(scatterDir);
 		ScatterGatherBackingStoreSupplier backingStore = new DefaultBackingStoreSupplier(scatterDir);
 
 		try (ZipArchiveOutputStream zipOut = new ZipArchiveOutputStream(new BufferedOutputStream(Files.newOutputStream(zipFile)))) {
