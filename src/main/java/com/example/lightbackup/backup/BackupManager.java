@@ -35,10 +35,12 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import org.apache.commons.compress.archivers.zip.DefaultBackingStoreSupplier;
 import org.apache.commons.compress.archivers.zip.ParallelScatterZipCreator;
 import org.apache.commons.compress.archivers.zip.ZipArchiveEntry;
 import org.apache.commons.compress.archivers.zip.ZipArchiveOutputStream;
 import org.apache.commons.compress.parallel.InputStreamSupplier;
+import org.apache.commons.compress.parallel.ScatterGatherBackingStoreSupplier;
 
 public final class BackupManager {
 	private static final DateTimeFormatter FILENAME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm-ss");
@@ -275,9 +277,14 @@ public final class BackupManager {
 			return t;
 		});
 
+		// buffer compressed entries in temp files instead of the heap -
+		// a multi-GB world would otherwise push the JVM to its memory ceiling
+		Path scatterDir = Files.createTempDirectory("lightbackup-scatter");
+		ScatterGatherBackingStoreSupplier backingStore = new DefaultBackingStoreSupplier(scatterDir);
+
 		try (ZipArchiveOutputStream zipOut = new ZipArchiveOutputStream(new BufferedOutputStream(Files.newOutputStream(zipFile)))) {
 			zipOut.setLevel(Math.max(1, Math.min(9, config.compressionLevel)));
-			ParallelScatterZipCreator scatter = new ParallelScatterZipCreator(pool);
+			ParallelScatterZipCreator scatter = new ParallelScatterZipCreator(pool, backingStore);
 
 			long sleepMs = Math.max(0, config.compressionSleepMs);
 			for (Path file : files) {
@@ -304,6 +311,16 @@ public final class BackupManager {
 			}
 		} finally {
 			pool.shutdownNow();
+			// backing stores are closed by writeTo; clean up the temp directory
+			try (var walk = Files.walk(scatterDir)) {
+				walk.sorted(Comparator.reverseOrder()).forEach(p -> {
+					try {
+						Files.deleteIfExists(p);
+					} catch (IOException ignored) {
+					}
+				});
+			} catch (IOException ignored) {
+			}
 		}
 	}
 
