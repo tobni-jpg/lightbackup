@@ -19,6 +19,11 @@ dependencies {
 
 	// Fabric API. This is technically optional, but you probably want it anyway.
 	implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
+
+	// Parallel zip compression (bundled into the mod jar)
+	implementation include("org.apache.commons:commons-compress:1.27.1")
+	implementation include("commons-io:commons-io:2.16.1")
+	implementation include("org.apache.commons:commons-lang3:3.14.0")
 }
 
 processResources {

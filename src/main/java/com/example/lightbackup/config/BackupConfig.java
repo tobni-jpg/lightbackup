@@ -21,7 +21,10 @@ public final class BackupConfig {
 	public int maxBackups = 10;
 	public boolean announceToPlayers = true;
 	public boolean autoUpload = false;
+	public int uploadEveryNthBackup = 1;
 	public int compressionSleepMs = 5;
+	public int compressionThreads = 1;
+	public int compressionLevel = 6;
 	public double rateLimitUploadMBPerSec = 10.0;
 
 	// Configurable messages. Placeholders: {reason} {filename} {error} {summary}
@@ -33,6 +36,7 @@ public final class BackupConfig {
 	public String msgUploadStart = "[LightBackup] Uploading '{filename}' to Google Drive...";
 	public String msgUploadDone = "[LightBackup] Upload of '{filename}' finished ({summary}).";
 	public String msgUploadFailed = "[LightBackup] Upload failed: {error}";
+	public String msgUploadSkipped = "[LightBackup] Upload skipped ({done}/{every}) - next upload in {remaining} backup(s).";
 	public String msgNoBackups = "[LightBackup] No backups found to upload.";
 
 	private static BackupConfig instance = new BackupConfig();
@@ -68,7 +72,10 @@ public final class BackupConfig {
 				config.maxBackups = getInt(root, "maxBackups", config.maxBackups);
 				config.announceToPlayers = getBoolean(root, "announceToPlayers", config.announceToPlayers);
 				config.autoUpload = getBoolean(root, "autoUpload", config.autoUpload);
+				config.uploadEveryNthBackup = getInt(root, "uploadEveryNthBackup", config.uploadEveryNthBackup);
 				config.compressionSleepMs = getInt(root, "compressionSleepMs", config.compressionSleepMs);
+				config.compressionThreads = getInt(root, "compressionThreads", config.compressionThreads);
+				config.compressionLevel = getInt(root, "compressionLevel", config.compressionLevel);
 				config.rateLimitUploadMBPerSec = getDouble(root, "rateLimitUploadMBPerSec", config.rateLimitUploadMBPerSec);
 				config.msgBackupCreate = getString(root, "msgBackupCreate", config.msgBackupCreate);
 				config.msgBackupDone = getString(root, "msgBackupDone", config.msgBackupDone);
@@ -78,6 +85,7 @@ public final class BackupConfig {
 				config.msgUploadStart = getString(root, "msgUploadStart", config.msgUploadStart);
 				config.msgUploadDone = getString(root, "msgUploadDone", config.msgUploadDone);
 				config.msgUploadFailed = getString(root, "msgUploadFailed", config.msgUploadFailed);
+				config.msgUploadSkipped = getString(root, "msgUploadSkipped", config.msgUploadSkipped);
 				config.msgNoBackups = getString(root, "msgNoBackups", config.msgNoBackups);
 				instance = config;
 				LightBackup.LOGGER.info("Loaded config from {}", CONFIG_PATH);
@@ -101,7 +109,10 @@ public final class BackupConfig {
 			root.addProperty("maxBackups", instance.maxBackups);
 			root.addProperty("announceToPlayers", instance.announceToPlayers);
 			root.addProperty("autoUpload", instance.autoUpload);
+			root.addProperty("uploadEveryNthBackup", instance.uploadEveryNthBackup);
 			root.addProperty("compressionSleepMs", instance.compressionSleepMs);
+			root.addProperty("compressionThreads", instance.compressionThreads);
+			root.addProperty("compressionLevel", instance.compressionLevel);
 			root.addProperty("rateLimitUploadMBPerSec", instance.rateLimitUploadMBPerSec);
 			root.addProperty("msgBackupCreate", instance.msgBackupCreate);
 			root.addProperty("msgBackupDone", instance.msgBackupDone);
@@ -111,6 +122,7 @@ public final class BackupConfig {
 			root.addProperty("msgUploadStart", instance.msgUploadStart);
 			root.addProperty("msgUploadDone", instance.msgUploadDone);
 			root.addProperty("msgUploadFailed", instance.msgUploadFailed);
+			root.addProperty("msgUploadSkipped", instance.msgUploadSkipped);
 			root.addProperty("msgNoBackups", instance.msgNoBackups);
 			Files.writeString(CONFIG_PATH, new GsonBuilder().setPrettyPrinting().create().toJson(root));
 		} catch (IOException e) {

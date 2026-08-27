@@ -62,7 +62,10 @@ All commands require permission level 4 (operator).
 | `maxBackups` | int | `10` | Maximum number of backups to keep (0 = unlimited) |
 | `announceToPlayers` | boolean | `true` | Broadcast backup status to all players |
 | `autoUpload` | boolean | `false` | Auto-upload backups to Google Drive after creation |
-| `compressionSleepMs` | int | `5` | Milliseconds to sleep per 8KB buffer during compression (0 = no throttling) |
+| `uploadEveryNthBackup` | int | `1` | Auto-upload only every Nth backup (1 = every backup, 0 = never). Counter survives restarts |
+| `compressionSleepMs` | int | `5` | Milliseconds to sleep per 8KB chunk **per compression worker** (0 = no throttling) |
+| `compressionThreads` | int | `1` | Number of parallel compression workers (core limiter, capped at available cores) |
+| `compressionLevel` | int | `6` | Deflate level 1 (fastest, most CPU-friendly) to 9 (smallest, most CPU) |
 | `rateLimitUploadMBPerSec` | double | `10.0` | Maximum upload speed in MB/s (0 = unlimited) |
 
 ### Custom messages
@@ -78,6 +81,7 @@ All server announcements can be customized via the following fields. Supported p
   "msgBackupFailed": "[LightBackup] Backup failed: {error}",
   "msgUploadStart": "[LightBackup] Uploading '{filename}' to Google Drive...",
   "msgUploadDone": "[LightBackup] Upload of '{filename}' finished ({summary}).",
+  "msgUploadSkipped": "[LightBackup] Upload skipped ({done}/{every}) - next upload in {remaining} backup(s).",
   "msgUploadFailed": "[LightBackup] Upload failed: {error}",
   "msgNoBackups": "[LightBackup] No backups found to upload."
 }

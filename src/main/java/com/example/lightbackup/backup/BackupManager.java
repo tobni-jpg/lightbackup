@@ -12,8 +12,11 @@ import net.minecraft.network.chat.TextColor;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.world.level.storage.LevelResource;
 
+import net.fabricmc.loader.api.FabricLoader;
+
 import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
+import java.io.FilterInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -24,11 +27,18 @@ import java.nio.file.SimpleFileVisitor;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.zip.ZipEntry;
-import java.util.zip.ZipOutputStream;
+
+import org.apache.commons.compress.archivers.zip.ParallelScatterZipCreator;
+import org.apache.commons.compress.archivers.zip.ZipArchiveEntry;
+import org.apache.commons.compress.archivers.zip.ZipArchiveOutputStream;
+import org.apache.commons.compress.parallel.InputStreamSupplier;
 
 public final class BackupManager {
 	private static final DateTimeFormatter FILENAME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm-ss");
@@ -110,7 +120,18 @@ public final class BackupManager {
 		LightBackup.LOGGER.info("Backup '{}' created ({})", filename, worldDir);
 		broadcast(server, ok(BackupConfig.fmt(config.msgBackupDone, "filename", filename)));
 
-		if (config.autoUpload && GDriveConfig.get().isConfigured()) {
+		if (!config.autoUpload || !GDriveConfig.get().isConfigured()) {
+			return;
+		}
+		int every = Math.max(0, config.uploadEveryNthBackup);
+		if (every == 0) {
+			LightBackup.LOGGER.info("Auto-upload disabled (uploadEveryNthBackup = 0), skipping upload of '{}'", filename);
+			return;
+		}
+		long count = nextBackupCount();
+		storeBackupCount(count);
+		long done = count % every;
+		if (done == 0) {
 			broadcast(server, accent(BackupConfig.fmt(config.msgUploadStart, "filename", filename)));
 			try {
 				String summary = GDriveUploader.uploadFile(zipFile.toAbsolutePath().toString());
@@ -119,6 +140,35 @@ public final class BackupManager {
 				LightBackup.LOGGER.error("Google Drive upload failed", e);
 				broadcast(server, error(BackupConfig.fmt(config.msgUploadFailed, "error", e.getMessage())));
 			}
+		} else {
+			long remaining = every - done;
+			broadcast(server, accent(BackupConfig.fmt(config.msgUploadSkipped,
+					"done", String.valueOf(done),
+					"every", String.valueOf(every),
+					"remaining", String.valueOf(remaining))));
+		}
+	}
+
+	private static Path counterFile() {
+		return FabricLoader.getInstance().getConfigDir().resolve("lightbackup.count");
+	}
+
+	private static long nextBackupCount() {
+		try {
+			if (Files.exists(counterFile())) {
+				return Long.parseLong(Files.readString(counterFile()).trim()) + 1;
+			}
+		} catch (Exception e) {
+			LightBackup.LOGGER.warn("Failed to read backup counter, restarting at 1", e);
+		}
+		return 1;
+	}
+
+	private static void storeBackupCount(long count) {
+		try {
+			Files.writeString(counterFile(), Long.toString(count));
+		} catch (IOException e) {
+			LightBackup.LOGGER.warn("Failed to persist backup counter", e);
 		}
 	}
 
@@ -167,50 +217,100 @@ public final class BackupManager {
 		}
 	}
 
+	/**
+	 * Zips the world directory. Compression runs on {@code compressionThreads} parallel
+	 * workers (bounded by the available cores); each worker can be CPU-throttled with
+	 * {@code compressionSleepMs} and uses deflater level {@code compressionLevel}.
+	 */
 	private static void zipDirectory(Path sourceDir, Path zipFile, Path excludedDir) throws IOException {
 		BackupConfig config = BackupConfig.get();
-		try (OutputStream fileOut = new BufferedOutputStream(Files.newOutputStream(zipFile));
-			 ZipOutputStream zipOut = new ZipOutputStream(fileOut)) {
 
-			Files.walkFileTree(sourceDir, new SimpleFileVisitor<>() {
-				@Override
-				public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) throws IOException {
-					if (dir.toAbsolutePath().normalize().startsWith(excludedDir)) {
-						return FileVisitResult.SKIP_SUBTREE;
-					}
-					String entry = toZipName(sourceDir, dir);
-					if (!entry.isEmpty()) {
-						zipOut.putNextEntry(new ZipEntry(entry + "/"));
-						zipOut.closeEntry();
-					}
-					return FileVisitResult.CONTINUE;
-				}
+		List<Path> files = new ArrayList<>();
+		Files.walkFileTree(sourceDir, new SimpleFileVisitor<>() {
+			@Override
+			public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) {
+				return dir.toAbsolutePath().normalize().startsWith(excludedDir)
+						? FileVisitResult.SKIP_SUBTREE
+						: FileVisitResult.CONTINUE;
+			}
 
-				@Override
-				public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
-					if (file.getFileName().toString().equals("session.lock")) {
-						return FileVisitResult.CONTINUE;
-					}
-					zipOut.putNextEntry(new ZipEntry(toZipName(sourceDir, file)));
-					try (InputStream in = new BufferedInputStream(Files.newInputStream(file))) {
-						byte[] buf = new byte[8192];
-						int read;
-						while ((read = in.read(buf)) != -1) {
-							zipOut.write(buf, 0, read);
-							if (config.compressionSleepMs > 0) {
-								try {
-									Thread.sleep(config.compressionSleepMs);
-								} catch (InterruptedException e) {
-									Thread.currentThread().interrupt();
-									throw new IOException("Compression interrupted", e);
-								}
-							}
-						}
-					}
-					zipOut.closeEntry();
-					return FileVisitResult.CONTINUE;
+			@Override
+			public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
+				if (!file.getFileName().toString().equals("session.lock")) {
+					files.add(file);
 				}
-			});
+				return FileVisitResult.CONTINUE;
+			}
+		});
+
+		int threads = Math.max(1, Math.min(config.compressionThreads, Runtime.getRuntime().availableProcessors()));
+		ExecutorService pool = Executors.newFixedThreadPool(threads, r -> {
+			Thread t = new Thread(r, "LightBackup-Compress");
+			t.setDaemon(true);
+			t.setPriority(Thread.MIN_PRIORITY);
+			return t;
+		});
+
+		try (ZipArchiveOutputStream zipOut = new ZipArchiveOutputStream(new BufferedOutputStream(Files.newOutputStream(zipFile)))) {
+			zipOut.setLevel(Math.max(1, Math.min(9, config.compressionLevel)));
+			ParallelScatterZipCreator scatter = new ParallelScatterZipCreator(pool);
+
+			long sleepMs = Math.max(0, config.compressionSleepMs);
+			for (Path file : files) {
+				ZipArchiveEntry entry = new ZipArchiveEntry(file.toFile(), toZipName(sourceDir, file));
+				final long sleep = sleepMs;
+				InputStreamSupplier supplier;
+				if (sleep == 0) {
+					supplier = () -> openUnchecked(file);
+				} else {
+					supplier = () -> new SleepingInputStream(openUnchecked(file), sleep);
+				}
+				scatter.addArchiveEntry(entry, supplier);
+			}
+			try {
+				scatter.writeTo(zipOut);
+			} catch (InterruptedException e) {
+				Thread.currentThread().interrupt();
+				throw new IOException("Compression interrupted", e);
+			} catch (ExecutionException e) {
+				Throwable cause = e.getCause() != null ? e.getCause() : e;
+				throw new IOException("Compression failed: " + cause.getMessage(), cause);
+			}
+		} finally {
+			pool.shutdownNow();
+		}
+	}
+
+	/** Opens a file stream, wrapping the checked {@link IOException} for use inside {@link InputStreamSupplier}. */
+	private static InputStream openUnchecked(Path file) {
+		try {
+			return new BufferedInputStream(Files.newInputStream(file));
+		} catch (IOException e) {
+			throw new java.io.UncheckedIOException(e);
+		}
+	}
+
+	/** Pauses {@code sleepMs} after every 8KB read - keeps CPU load per worker in check. */
+	private static final class SleepingInputStream extends FilterInputStream {
+		private final long sleepMs;
+
+		SleepingInputStream(InputStream in, long sleepMs) {
+			super(in);
+			this.sleepMs = sleepMs;
+		}
+
+		@Override
+		public int read(byte[] b, int off, int len) throws IOException {
+			int n = super.read(b, off, len);
+			if (n > 0 && sleepMs > 0) {
+				try {
+					Thread.sleep(sleepMs);
+				} catch (InterruptedException e) {
+					Thread.currentThread().interrupt();
+					throw new IOException("Interrupted during compression", e);
+				}
+			}
+			return n;
 		}
 	}
 
