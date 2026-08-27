@@ -58,6 +58,7 @@ public class LightBackup implements ModInitializer {
 					.then(Commands.literal("reload")
 							.executes(context -> {
 								BackupConfig.load();
+								GDriveConfig.load();
 								context.getSource().sendSuccess(() -> Component.literal("[LightBackup] Config reloaded."), true);
 								return 1;
 							}))
@@ -75,7 +76,7 @@ public class LightBackup implements ModInitializer {
 												return 1;
 											}))))
 					.then(Commands.literal("gdrive-auth")
-							.then(Commands.argument("code", StringArgumentType.word())
+							.then(Commands.argument("code", StringArgumentType.greedyString())
 									.executes(context -> {
 										String code = StringArgumentType.getString(context, "code");
 										GDriveConfig gconfig = GDriveConfig.get();
